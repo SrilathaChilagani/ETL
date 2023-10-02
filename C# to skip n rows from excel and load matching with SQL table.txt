@@ -1,0 +1,169 @@
+
+
+
+#region Namespaces
+using System;
+using System.Data;
+using Microsoft.SqlServer.Dts.Runtime;
+using System.Windows.Forms;
+using System.IO;
+using System.Data.OleDb;
+using System.Data.SqlClient;
+#endregion
+
+namespace ST_c6633016e54045479b3b809bdae970fa
+{
+
+
+    [Microsoft.SqlServer.Dts.Tasks.ScriptTask.SSISScriptTaskEntryPointAttribute]
+
+
+    public partial class ScriptMain : Microsoft.SqlServer.Dts.Tasks.ScriptTask.VSTARTScriptObjectModelBase
+    {
+
+        public void Main()
+        {
+            //Logging if needed 
+            //the datetime and Log folder will be used for error log file in case error occured
+            //string datetime = DateTime.Now.ToString("yyyyMMddHHmmss");
+            //string LogFolder = @"C:C:\Users\XYZ\Documents";
+            try
+            {
+                //Provide the path where Excel files exists
+                string FolderPath = @"C:\Users\XYZ\Documents";
+                //Provide the table name in which you want to load the data
+                string TableName = "TableName";
+                //Provide the schema of table 
+                string SchemaName = "dbo";
+                //Provide the starting column for read actul records
+                string StartingColumn = "A";
+                //Provide the end column till which you want to read
+                string EndingColumn = "BE";
+                //Provide the row number from which you like to start reading
+                string StartReadingFromRow = "3";
+                //Provide the Database Name in which table or view exists
+                string DatabaseName = "DBName";
+                //Provide the SQL Server Name 
+                string SQLServerName = "ServerName";
+                var directory = new DirectoryInfo(FolderPath);
+                FileInfo[] files = directory.GetFiles();
+
+                //Declare and initilize variables
+                string fileFullPath = "";
+
+                //Get one Book(Excel file at a time)
+                foreach (FileInfo file in files)
+                {
+                    fileFullPath = FolderPath + "\\" + file.Name;
+
+                    //Create Excel Connection
+                    string ConStr;
+                    string HDR;
+                    HDR = "NO";
+                    ConStr = "Provider=Microsoft.ACE.OLEDB.12.0;Data Source="
+                        + fileFullPath + ";Extended Properties=\"Excel 12.0;HDR=" + HDR + ";IMEX=0\"";
+                    OleDbConnection cnn = new OleDbConnection(ConStr);
+
+                    //Get Sheet Name, it can handle multiple sheets
+                    cnn.Open();
+                    DataTable dtSheet = cnn.GetOleDbSchemaTable(OleDbSchemaGuid.Tables, null);
+                    string sheetname;
+                    sheetname = "";
+                    foreach (DataRow drSheet in dtSheet.Rows)
+                    {
+                        if (drSheet["TABLE_NAME"].ToString().Contains("$"))
+                        {
+                            sheetname = drSheet["TABLE_NAME"].ToString();
+
+                            //Load the DataTable with Sheet Data so we can get the column header
+                            OleDbCommand oconn = new OleDbCommand("select top 1 * from ["
+                                + sheetname + StartingColumn + StartReadingFromRow + ":" + EndingColumn + "]", cnn);
+                            OleDbDataAdapter adp = new OleDbDataAdapter(oconn);
+                            DataTable dt = new DataTable();
+                            adp.Fill(dt);
+                            cnn.Close();
+                            //Prepare Header columns list so we can run against Database to get matching columns for a table.
+                            //If columns does not exists in table, it will ignore and load only matching columns data
+                            string ExcelHeaderColumn = "";
+                            string SQLQueryToGetMatchingColumn = "";
+                            for (int i = 0; i < dt.Columns.Count; i++)
+                            {
+                                if (i != dt.Columns.Count - 1)
+                                    ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'" + ",";
+                                else
+                                    ExcelHeaderColumn += "'" + dt.Columns[i].ColumnName + "'";
+                            }
+
+                            SQLQueryToGetMatchingColumn = "select STUFF((Select  ',['+Column_Name+']' from Information_schema.Columns where Table_Name='" +
+                                TableName + "' and Table_SChema='" + SchemaName + "'" +
+                                "and Column_Name in (" + @ExcelHeaderColumn + ") for xml path('')),1,1,'') AS ColumnList";
+
+
+                            //Create Connection to SQL Server Database from which you like to export tables to Excel
+                            SqlConnection SQLConnection = new SqlConnection();
+                            SQLConnection.ConnectionString = "Data Source = "
+                                + SQLServerName + "; Initial Catalog ="
+                                + DatabaseName + "; "
+                                + "Integrated Security=true;";
+
+                            //Get Matching Column List from SQL Server
+                            string SQLColumnList = "";
+                            SqlCommand cmd = SQLConnection.CreateCommand();
+                            cmd.CommandText = SQLQueryToGetMatchingColumn;
+                            SQLConnection.Open();
+                            SQLColumnList = (string)cmd.ExecuteScalar();
+                            SQLConnection.Close();
+
+                            //Use Actual Matching Columns to get data from Excel Sheet
+                            OleDbConnection cnn1 = new OleDbConnection(ConStr);
+                            cnn1.Open();
+                            OleDbCommand oconn1 = new OleDbCommand("select " + SQLColumnList
+                                + " from [" + sheetname + StartingColumn
+                                + StartReadingFromRow + ":" + EndingColumn + "]", cnn1);
+                            OleDbDataAdapter adp1 = new OleDbDataAdapter(oconn1);
+                            DataTable dt1 = new DataTable();
+                            adp1.Fill(dt1);
+                            cnn1.Close();
+                            SQLConnection.Open();
+                            //Load Data from DataTable to SQL Server Table.
+                            using (SqlBulkCopy BC = new SqlBulkCopy(SQLConnection))
+                            {
+                                BC.DestinationTableName = SchemaName + "." + TableName;
+                                foreach (var column in dt1.Columns)
+                                    BC.ColumnMappings.Add(column.ToString(), column.ToString());
+                                BC.WriteToServer(dt1);
+                            }
+                            SQLConnection.Close();
+
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ex.Source != null)
+                    Console.WriteLine("IOException source: {0}", ex.Source);
+                throw;
+            }
+
+
+            Dts.TaskResult = (int)ScriptResults.Success;
+        }
+  
+
+            #region ScriptResults declaration
+            /// <summary>
+            /// This enum provides a convenient shorthand within the scope of this class for setting the
+            /// result of the script.
+            /// 
+            /// This code was generated automatically.
+            /// </summary>
+            enum ScriptResults
+            {
+                Success = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Success,
+                Failure = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Failure
+            };
+            #endregion
+
+        }
+    }

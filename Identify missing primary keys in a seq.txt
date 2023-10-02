@@ -1,0 +1,10 @@
+data = spark.range(0, 5)
+data.createOrReplaceTempView("data")
+
+####################################################
+min=1
+max=10
+df=spark.sql("SELECT distinct id FROM data where id between "+str(min)+" and "+str(max))
+df_range=spark.range(min,max+1)
+df_out=df_range.join(df,df.id==df_range.id,'leftanti')
+df_out.display() 

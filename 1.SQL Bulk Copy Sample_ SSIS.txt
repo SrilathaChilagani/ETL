@@ -1,0 +1,112 @@
+#region Namespaces
+using System;
+using System.Data;
+using Microsoft.SqlServer.Dts.Runtime;
+using System.Windows.Forms;
+using System.Data.SqlClient;
+using System.IO;
+using System.Data.OleDb;
+using System.Collections.Generic;
+using System.Text;
+#endregion
+
+namespace ST_d45bf22efdb94bcf8eabb444bf36848b
+{
+
+	[Microsoft.SqlServer.Dts.Tasks.ScriptTask.SSISScriptTaskEntryPointAttribute]
+	public partial class ScriptMain : Microsoft.SqlServer.Dts.Tasks.ScriptTask.VSTARTScriptObjectModelBase
+	{
+       
+        
+        public void Main()
+		{
+            string SourceCon = Dts.Variables["User::SourceConn"].Value.ToString();
+            string DestCon = Dts.Variables["User::DestConn"].Value.ToString();
+            string SrcQuery = Dts.Variables["User::SourceQuery"].Value.ToString();
+            string DestTbl = Dts.Variables["User::DestinationTable"].Value.ToString();
+            
+			/*SSIS Bulk Copy Table to Table Sample*/
+            /* ConnString Setup */
+
+            /* Src Con */
+            OleDbConnectionStringBuilder srcdecoder = new OleDbConnectionStringBuilder(SourceCon);
+
+            SqlConnectionStringBuilder sqlSrcConnectionString = new SqlConnectionStringBuilder();
+            sqlSrcConnectionString.DataSource = srcdecoder.DataSource;
+            sqlSrcConnectionString.InitialCatalog = srcdecoder["Initial Catalog"].ToString();
+            //windows integraded security or username / password
+            if (srcdecoder["Integrated Security"].ToString() == "SSPI")
+            {
+                sqlSrcConnectionString.IntegratedSecurity = true;
+            }
+            else
+            {
+                sqlSrcConnectionString.UserID = srcdecoder["User"].ToString();
+                sqlSrcConnectionString.Password = srcdecoder["Password"].ToString();
+            }
+
+            SqlConnection SrcCon = new SqlConnection(sqlSrcConnectionString.ToString());
+
+            /* Dest Conn */
+
+            OleDbConnectionStringBuilder destdecoder = new OleDbConnectionStringBuilder(DestCon);
+
+            SqlConnectionStringBuilder sqlDestConnectionString = new SqlConnectionStringBuilder();
+            sqlDestConnectionString.DataSource = destdecoder.DataSource;
+            sqlDestConnectionString.InitialCatalog = destdecoder["Initial Catalog"].ToString();
+            
+            //windows integraded security or username / password
+
+            if (destdecoder["Integrated Security"].ToString() == "SSPI")
+            {
+                sqlDestConnectionString.IntegratedSecurity = true;
+            }
+            else
+            {
+                sqlDestConnectionString.UserID = destdecoder["User"].ToString();
+                sqlDestConnectionString.Password = destdecoder["Password"].ToString();
+            }
+
+            SqlConnection DstCon = new SqlConnection(sqlDestConnectionString.ToString());
+
+            /* Bcp */
+
+
+            using (SqlCommand SrcSQL = new SqlCommand(SrcQuery, SrcCon))
+            {
+                SrcCon.Open();
+                using (SqlDataReader rdr = SrcSQL.ExecuteReader())
+                {
+                    using (SqlBulkCopy bcp = new SqlBulkCopy(DstCon, SqlBulkCopyOptions.TableLock, null)
+            )
+                    {
+
+                        bcp.DestinationTableName = DestTbl;
+                        DstCon.Open();
+                        bcp.BulkCopyTimeout = 0;
+                        bcp.BatchSize = 10000;
+                        bcp.WriteToServer(rdr);
+
+                    }
+                }
+            }
+
+                    Dts.TaskResult = (int)ScriptResults.Success;
+                }
+
+        #region ScriptResults declaration
+        /// <summary>
+        /// This enum provides a convenient shorthand within the scope of this class for setting the
+        /// result of the script.
+        /// 
+        /// This code was generated automatically.
+        /// </summary>
+        enum ScriptResults
+        {
+            Success = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Success,
+            Failure = Microsoft.SqlServer.Dts.Runtime.DTSExecResult.Failure
+        };
+        #endregion
+
+	}
+}
